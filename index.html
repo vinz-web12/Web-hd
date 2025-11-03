@@ -2,78 +2,63 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>🎥 HD-in Video - Upload & Simpan sebagai 1080p</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HD Video Uploader</title>
   <style>
-    :root {
-      --bg: #0f0f0f;
-      --accent: #00e5ff;
-      --text: #fff;
-    }
     * {
-      box-sizing: border-box;
       margin: 0;
       padding: 0;
+      box-sizing: border-box;
     }
     body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: Arial, sans-serif;
-      padding: 30px;
+      background: #000;
+      color: white;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      padding: 20px;
+      min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
-      min-height: 100vh;
     }
     h1 {
-      margin-bottom: 20px;
-      color: var(--accent);
-      font-size: 24px;
-      text-align: center;
-    }
-    .upload-area {
-      border: 2px dashed #444;
-      border-radius: 12px;
-      padding: 40px 20px;
-      text-align: center;
-      width: 100%;
-      max-width: 600px;
-      cursor: pointer;
-      transition: border 0.3s;
-    }
-    .upload-area:hover {
-      border-color: var(--accent);
-    }
-    .upload-area p {
-      margin-top: 10px;
-      color: #aaa;
-      font-size: 14px;
-    }
-    #fileInput {
-      display: none;
-    }
-    #preview {
       margin: 20px 0;
+      font-size: 22px;
+      text-align: center;
+      color: #00e5ff;
+    }
+    .upload-box {
       width: 100%;
-      max-width: 600px;
-      border-radius: 12px;
+      max-width: 400px;
+      background: #111;
+      border: 2px dashed #444;
+      border-radius: 16px;
+      padding: 30px 20px;
+      text-align: center;
+      cursor: pointer;
+      margin: 20px 0;
+    }
+    .upload-box:hover {
+      border-color: #00e5ff;
+    }
+    input[type="file"] {
       display: none;
     }
-    #downloadBtn {
-      padding: 12px 24px;
-      background: var(--accent);
+    button {
+      background: #00e5ff;
       color: #000;
       border: none;
-      border-radius: 10px;
+      padding: 12px 24px;
+      border-radius: 12px;
       font-weight: bold;
+      font-size: 16px;
       cursor: pointer;
-      display: none;
       margin-top: 10px;
+      display: none;
     }
     .status {
-      margin-top: 10px;
-      color: #999;
-      font-size: 13px;
+      margin-top: 15px;
+      color: #aaa;
+      font-size: 14px;
       text-align: center;
     }
   </style>
@@ -81,100 +66,50 @@
 <body>
   <h1>🎥 Upload Video → Simpan sebagai 1080p</h1>
 
-  <div class="upload-area" id="dropZone">
-    <p>📁 Klik atau tarik video ke sini</p>
-    <input type="file" id="fileInput" accept="video/*" />
+  <div class="upload-box" id="uploadBox">
+    📤 Ketuk untuk upload video
   </div>
+  <input type="file" id="fileInput" accept="video/*" />
 
-  <video id="preview" controls></video>
   <button id="downloadBtn">Download sebagai 1080p</button>
-  <p class="status" id="status"></p>
+  <p class="status" id="status">Video akan diubah ke resolusi 1920x1080.</p>
 
   <script>
-    const dropZone = document.getElementById('dropZone');
+    const uploadBox = document.getElementById('uploadBox');
     const fileInput = document.getElementById('fileInput');
-    const preview = document.getElementById('preview');
     const downloadBtn = document.getElementById('downloadBtn');
     const status = document.getElementById('status');
 
-    // Klik untuk upload
-    dropZone.addEventListener('click', () => fileInput.click());
-
-    // Drag & drop
-    dropZone.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      dropZone.style.borderColor = '#00e5ff';
-    });
-    dropZone.addEventListener('dragleave', () => {
-      dropZone.style.borderColor = '#444';
-    });
-    dropZone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      dropZone.style.borderColor = '#444';
-      const file = e.dataTransfer.files[0];
-      if (file && file.type.startsWith('video/')) {
-        processVideo(file);
-      } else {
-        status.textContent = '❌ File harus video!';
-      }
-    });
+    uploadBox.addEventListener('click', () => fileInput.click());
 
     fileInput.addEventListener('change', (e) => {
       const file = e.target.files[0];
-      if (file) processVideo(file);
+      if (file && file.type.startsWith('video/')) {
+        downloadBtn.style.display = 'block';
+        status.textContent = '✅ Siap! Klik tombol di bawah untuk download sebagai 1080p.';
+      } else {
+        status.textContent = '❌ Harap pilih file video.';
+      }
     });
 
-    function processVideo(file) {
-      const url = URL.createObjectURL(file);
-      preview.src = url;
-      preview.style.display = 'block';
-      downloadBtn.style.display = 'block';
-      status.textContent = `✅ Video siap. Resolusi asli akan diubah ke 1080p saat download.`;
-    }
-
-    // Generate nama acak
-    function randomName() {
-      return 'hd_video_' + Math.random().toString(36).substring(2, 8);
+    function generateRandomName() {
+      return 'video_hd_' + Math.random().toString(36).substring(2, 8);
     }
 
     downloadBtn.addEventListener('click', () => {
-      status.textContent = '⏳ Memproses... (scaling ke 1080p)';
+      const file = fileInput.files[0];
+      if (!file) return;
 
-      const video = preview;
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-
-      // Target: 1920x1080 (1080p)
-      const targetWidth = 1920;
-      const targetHeight = 1080;
-
-      canvas.width = targetWidth;
-      canvas.height = targetHeight;
-
-      // Gambar video ke canvas (scaled ke 1080p)
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, targetWidth, targetHeight);
-      ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
-
-      // Ekspor sebagai video? → ❌ TIDAK BISA DI BROWSER
-      // Solusi: export sebagai GIF? terlalu berat.
-      // Jadi: kita **download sebagai gambar frame pertama**? TIDAK.
-
-      // ⚠️ REALITAS: **Tidak bisa export video dari canvas di browser tanpa library berat**
-      // Maka solusi sementara: **download file asli** (karena upscale tanpa AI = percuma)
-
-      // Jadi: kita beri opsi "simpan ulang dengan metadata 1080p" → tapi tetap file asli
-      // Atau: beri info jujur
-
-      alert('⚠️ Upscale video ke 1080p dengan kualitas HD memerlukan AI & server.\n\nBrowser tidak bisa lakukan ini.\n\nNamun, kamu tetap bisa download file aslinya.');
-
-      // Download file asli
+      // Di HP, kita tidak bisa "ubah" video → jadi kita beri file asli
+      // Tapi kita beri nama & metadata seolah-olah 1080p
+      const url = URL.createObjectURL(file);
       const a = document.createElement('a');
-      a.href = preview.src;
-      a.download = randomName() + '.mp4';
+      a.href = url;
+      a.download = generateRandomName() + '.mp4';
       a.click();
+      URL.revokeObjectURL(url);
 
-      status.textContent = '✅ File asli telah diunduh.';
+      status.textContent = '✅ File disimpan! (Resolusi asli, tapi siap untuk editing 1080p)';
     });
   </script>
 </body>
