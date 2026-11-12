@@ -165,7 +165,6 @@ const val=id=>+$('#'+id).value;
 const sync=()=>SL.forEach(([id])=>$('#o'+id).textContent=val(id).toFixed(2));
 
 let mode='foto',S=null,R=null,dl=null,busy=false,rec=null,go=false,canceled=false,errText='',AC,SRC,DEST,spk,q=0;
-window.claude?.use('downloads').then(d=>{dl=d}).catch(()=>{});
 const say=t=>{msg.textContent=t};
 
 function outSize(w,h){
@@ -247,57 +246,66 @@ $('#cmp').addEventListener('input',e=>stage.style.setProperty('--p',e.target.val
 sync();
 
 const FM={png:['image/png','png'],jpg:['image/jpeg','jpg'],webp:['image/webp','webp']};
-const save=(b,e)=>dl.save({filename:S.name.replace(/\.[^.]+$/,'')+'-hd.'+e,data:b}).then(()=>say('Tersimpan.')).catch(x=>{if(!x||x.code!='declined')say('Gagal menyimpan file.')});
+const save=(b,e)=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=S.name.replace(/\.[^.]+$/,'')+'-hd.'+e;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},5000);say('Mengunduh hasil…')};
 $('#save').onclick=()=>{
- if(!dl){say('Penyimpanan tidak tersedia di tampilan ini. Buka halaman ini langsung dari tautan artefaknya.');return}
  if(mode=='foto'){draw();const[t,e]=FM[$('#fmt').value];cv.toBlob(b=>b?save(b,e):say('Gagal membuat file. Coba resolusi yang lebih kecil.'),t,.95)}
  else save(R.blob,R.ext);
 };
 
 $('#stop').onclick=()=>{canceled=true;if(rec&&rec.state!='inactive')rec.stop()};
-$('#go').onclick=async()=>{
- if(!window.MediaRecorder||!cv.captureStream){say('Browser ini belum mendukung perekaman video. Coba Chrome, Edge, atau Safari terbaru.');return}
- busy=true;canceled=false;errText='';R=null;$('#result').hidden=true;say('Memproses. Biarkan tab ini tetap terbuka dan terlihat sampai selesai.');
- stage.dataset.s='vrun';pv.controls=false;setOut();ui();
- const ch=[];let withAudio=false;
- const fail=e=>{
-  errText='Gagal memproses: '+((e&&(e.name||e.message))?(e.name||'')+' '+(e.message||''):String(e));canceled=true;
-  if(rec&&rec.state!='inactive')rec.stop();
-  else{go=false;busy=false;stage.dataset.s='vsrc';pv.controls=true;say(errText);ui()}
+const CODECS=(window.MediaRecorder?['video/mp4;codecs=avc1,mp4a.40.2','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].filter(m=>MediaRecorder.isTypeSupported(m)):[]);
+let attemptId=0;
+function finish(m){go=false;if(spk)spk.gain.value=1;try{pv.pause()}catch(_){}pv.controls=true;busy=false;stage.dataset.s='vsrc';say(m);ui()}
+$('#go').onclick=()=>{
+ if(!window.MediaRecorder||!cv.captureStream){say('Browser ini belum mendukung perekaman video. Gunakan Chrome, Edge, atau Safari terbaru.');return}
+ busy=true;canceled=false;R=null;$('#result').hidden=true;pg.value=0;
+ say('Memproses. Biarkan tab ini tetap terbuka dan terlihat sampai selesai.');
+ stage.dataset.s='vrun';pv.controls=false;pv.muted=false;setOut();ui();runVideo(0);
+};
+async function runVideo(ci){
+ const my=++attemptId,ch=[],mt=CODECS[ci]||'';let fin=false;
+ const bail=e=>{
+  if(fin||my!==attemptId)return;fin=true;go=false;
+  try{if(rec&&rec.state!='inactive'){rec.onstop=null;rec.ondataavailable=null;rec.onerror=null;rec.stop()}}catch(_){}
+  try{pv.pause()}catch(_){}
+  if(!ch.length&&!canceled&&ci+1<CODECS.length){runVideo(ci+1);return}
+  finish('Gagal memproses'+(e&&(e.name||e.message)?': '+(e.name||'')+' '+(e.message||''):'')+'. Coba pilih resolusi lebih kecil (1080p atau 720p).');
  };
  try{
+  let withAudio=false;
   try{
    AC=AC||new AudioContext();await Promise.race([AC.resume(),new Promise(r=>setTimeout(r,800))]);
    if(!SRC){SRC=AC.createMediaElementSource(pv);DEST=AC.createMediaStreamDestination();spk=AC.createGain();SRC.connect(DEST);SRC.connect(spk);spk.connect(AC.destination)}
    spk.gain.value=0;withAudio=true;
-  }catch(_){withAudio=false}
-  S.up=false;await new Promise(r=>{pv.onseeked=r;pv.currentTime=0;setTimeout(r,400)});draw();
+  }catch(_){}
+  await new Promise(r=>{pv.onseeked=r;pv.currentTime=0;setTimeout(r,400)});
+  S.up=false;draw();
   const st=cv.captureStream();
   if(withAudio)DEST.stream.getAudioTracks().forEach(t=>st.addTrack(t));
-  const mt=['video/mp4;codecs=avc1,mp4a.40.2','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].find(m=>MediaRecorder.isTypeSupported(m))||'';
   const bps=Math.min(2.5e7,cv.width*cv.height*30*.2);
-  try{rec=new MediaRecorder(st,mt?{mimeType:mt,videoBitsPerSecond:bps}:{videoBitsPerSecond:bps})}catch(_){rec=new MediaRecorder(st)}
+  rec=new MediaRecorder(st,mt?{mimeType:mt,videoBitsPerSecond:bps}:{videoBitsPerSecond:bps});
   rec.ondataavailable=e=>{if(e.data.size)ch.push(e.data)};
-  rec.onerror=e=>fail(e.error||e);
+  rec.onerror=e=>bail(e.error||e);
   rec.onstop=()=>{
-   go=false;if(spk)spk.gain.value=1;pv.pause();pv.controls=true;busy=false;stage.dataset.s='vsrc';
-   if(!canceled&&ch.length){
-    const type=(rec.mimeType||mt||'video/webm').split(';')[0];
-    R={blob:new Blob(ch,{type}),ext:type.includes('mp4')?'mp4':'webm'};
-    if($('#rv').src)URL.revokeObjectURL($('#rv').src);
-    $('#rv').src=URL.createObjectURL(R.blob);$('#result').hidden=false;say('Selesai. Putar hasilnya di bawah, lalu simpan.');
-   }else say(errText||(canceled?'Dibatalkan.':'Perekaman gagal. Coba pilih resolusi lebih kecil, misalnya 1080p.'));
-   ui();
+   if(fin||my!==attemptId)return;fin=true;
+   if(canceled||!ch.length){finish(canceled?'Dibatalkan.':'Perekaman gagal. Coba pilih resolusi lebih kecil.');return}
+   const type=(rec.mimeType||mt||'video/webm').split(';')[0];
+   R={blob:new Blob(ch,{type}),ext:type.includes('mp4')?'mp4':'webm'};
+   if($('#rv').src)URL.revokeObjectURL($('#rv').src);
+   $('#rv').src=URL.createObjectURL(R.blob);$('#result').hidden=false;
+   finish('Selesai! Putar hasilnya di bawah, lalu klik Simpan hasil.');
   };
   const tick=()=>{
-   if(!go)return;draw();pg.value=pv.duration?pv.currentTime/pv.duration:0;
+   if(!go||my!==attemptId)return;draw();pg.value=pv.duration?pv.currentTime/pv.duration:0;
    if('requestVideoFrameCallback' in pv)pv.requestVideoFrameCallback(tick);else requestAnimationFrame(tick);
   };
-  pv.onended=()=>{draw();setTimeout(()=>{if(rec.state!='inactive')rec.stop()},250)};
+  pv.onended=()=>{if(my!==attemptId)return;draw();setTimeout(()=>{if(rec.state!='inactive')rec.stop()},250)};
   go=true;rec.start(500);
-  pv.play().then(()=>tick()).catch(fail);
- }catch(e){fail(e)}
-};
+  try{await pv.play()}catch(_){pv.muted=true;await pv.play()}
+  tick();
+  setTimeout(()=>{if(!fin&&my===attemptId&&!ch.length)bail(new Error('encoder tidak menghasilkan data'))},6000);
+ }catch(e){bail(e)}
+}
 ui();
 })();
 </script>
