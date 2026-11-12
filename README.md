@@ -10,4 +10,5 @@ Website statis untuk memperbesar (sampai 4K) dan mempertajam foto atau video. Se
 ## Catatan
 - Foto: hasil disimpan sebagai PNG, JPG, atau WebP.
 - Video: diproses sepanjang durasinya (real-time). Biarkan tab tetap terbuka. Hasil MP4 (Chrome/Edge/Safari terbaru) atau WebM.
-- Untuk video, 1080p paling aman. 4K butuh perangkat yang kuat.
+- Video: hasil maksimal 1080p (pilihan 1080p atau 720p) dengan frame rate 60 atau 30 fps. Jika video asli 30 fps, frame digandakan agar file menjadi 60 fps.
+- Kalau proses terasa berat, pilih 720p atau 30 fps dan tutup tab lain.

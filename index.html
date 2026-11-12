@@ -91,6 +91,7 @@ progress{flex:1;min-width:140px;height:10px;accent-color:var(--acc)}
 <option value="1440">2K (1440p)</option>
 <option value="2160" selected>4K (2160p)</option>
 </select></label>
+<span id="fpsw" hidden><label class="f" style="grid-auto-flow:column;align-items:center;gap:10px">Frame rate<select id="fps"><option value="60" selected>60 fps</option><option value="30">30 fps</option></select></label></span>
 <span id="fmtw" class="row" style="gap:10px"><label class="f" style="grid-auto-flow:column;align-items:center;gap:10px">Format
 <select id="fmt"><option value="png">PNG (kualitas penuh)</option><option value="jpg">JPG</option><option value="webp">WebP</option></select></label></span>
 <span class="row" style="margin-left:auto">
@@ -101,6 +102,7 @@ progress{flex:1;min-width:140px;height:10px;accent-color:var(--acc)}
 </div>
 <div class="grid" id="sl"></div>
 <p class="note">Cara kerjanya: pembesaran bicubic, pengurangan noise yang menjaga tepi, lalu penajaman. Detail yang memang tidak ada di file asli tidak bisa dibuat ulang, jadi hasil terbaik datang dari sumber yang sudah cukup bersih.</p>
+<p class="note" id="vnote" hidden>Video: hasil maksimal 1080p. Kalau video asli 30 fps, frame digandakan agar file berformat 60 fps (gerakan tidak jadi lebih halus). Biarkan tab tetap terbuka dan terlihat selama proses.</p>
 </section>
 
 <div class="row">
@@ -120,7 +122,7 @@ progress{flex:1;min-width:140px;height:10px;accent-color:var(--acc)}
 (()=>{
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 const cv=$('#cv'),stage=$('#stage'),pv=$('#pv'),orig=$('#orig'),msg=$('#msg'),pg=$('#pg');
-const gl=cv.getContext('webgl',{preserveDrawingBuffer:true,antialias:false,alpha:false});
+const gl=cv.getContext('webgl',{preserveDrawingBuffer:true,antialias:false,alpha:false,powerPreference:'high-performance'});
 if(!gl){document.querySelector('main').innerHTML='<p>Browser ini tidak mendukung WebGL. Coba Chrome, Edge, Firefox, atau Safari terbaru.</p>';return}
 const VS='attribute vec2 p;varying vec2 uv;void main(){uv=vec2(p.x*.5+.5,.5-p.y*.5);gl_Position=vec4(p,0.,1.);}';
 const FS=`#ifdef GL_FRAGMENT_PRECISION_HIGH
@@ -138,12 +140,12 @@ vec3 cr(vec2 u){
  +T(vec2(a.x,b.y))*w0.x*w12.y+T(vec2(b.x,b.y))*w12.x*w12.y+T(vec2(c.x,b.y))*w3.x*w12.y
  +T(vec2(a.x,c.y))*w0.x*w3.y+T(vec2(b.x,c.y))*w12.x*w3.y+T(vec2(c.x,c.y))*w3.x*w3.y;}
 void main(){
- vec2 d=rd/ts,e=1.5/ts;
- vec3 c=cr(uv);
- vec3 bw=(T(uv+vec2(e.x,0.))+T(uv-vec2(e.x,0.))+T(uv+vec2(0.,e.y))+T(uv-vec2(0.,e.y)))*.25;
- c=mix(c,bw,dn*(1.-smoothstep(.02,.14,length(c-bw))));
+ vec2 d=rd/ts;
+ vec3 c0=cr(uv);
  vec3 bl=(T(uv+vec2(d.x,0.))+T(uv-vec2(d.x,0.))+T(uv+vec2(0.,d.y))+T(uv-vec2(0.,d.y)))*.25;
- c+=sh*(c-bl);
+ vec3 dt=c0-bl;
+ float m=smoothstep(.012,.06,length(dt));
+ vec3 c=mix(c0,bl,dn*(1.-m))+sh*dt*m;
  c=(c-.5)*ct+.5;
  float l=dot(c,vec3(.299,.587,.114));
  c=mix(vec3(l),c,sa);
@@ -161,8 +163,8 @@ const MAXT=gl.getParameter(gl.MAX_TEXTURE_SIZE);
 const SL=[['sh','Ketajaman',0,2,.05,.9],['rd','Radius penajaman',.3,2,.05,.7],['dn','Pengurangan noise',0,1,.05,.3],['ct','Kontras',.8,1.4,.01,1.06],['sa','Warna',.8,1.5,.01,1.08]];
 const PRE={nat:[.5,.7,.2,1.02,1.04],taj:[.9,.7,.3,1.06,1.08],mak:[1.3,.6,.45,1.1,1.12]};
 $('#sl').innerHTML=SL.map(([id,n,a,b,s,v])=>`<label class="f"><span>${n}<output id="o${id}"></output></span><input type="range" id="${id}" min="${a}" max="${b}" step="${s}" value="${v}"></label>`).join('');
-const val=id=>+$('#'+id).value;
-const sync=()=>SL.forEach(([id])=>$('#o'+id).textContent=val(id).toFixed(2));
+const val=id=>+$('#'+id).value;const P={};
+const sync=()=>SL.forEach(([id])=>{P[id]=val(id);$('#o'+id).textContent=P[id].toFixed(2)});
 
 let mode='foto',S=null,R=null,dl=null,busy=false,rec=null,go=false,canceled=false,errText='',AC,SRC,DEST,spk,q=0;
 const say=t=>{msg.textContent=t};
@@ -177,7 +179,7 @@ function setOut(){
  if(!S)return;
  const[W,H]=outSize(S.w,S.h);cv.width=W;cv.height=H;
  stage.style.setProperty('--ar',W/H);
- $('#info').textContent=S.w+'×'+S.h+' → '+W+'×'+H+(S.kind=='video'?' · lama proses ≈ '+fmtT(S.dur)+' (sepanjang video)':'');
+ $('#info').textContent=S.w+'×'+S.h+' → '+W+'×'+H+(S.kind=='video'?' · '+$('#fps').value+' fps · lama proses ≈ '+fmtT(S.dur):'');
 }
 function draw(){
  if(!S)return;
@@ -187,7 +189,7 @@ function draw(){
  }
  gl.viewport(0,0,cv.width,cv.height);
  gl.uniform2f(U.ts,S.w,S.h);
- ['sh','rd','ct','sa','dn'].forEach(n=>gl.uniform1f(U[n],val(n)));
+ for(const n in P)gl.uniform1f(U[n],P[n]);
  gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
 }
 const render=()=>{cancelAnimationFrame(q);q=requestAnimationFrame(()=>{if(S&&S.kind=='foto')draw()})};
@@ -195,7 +197,7 @@ const render=()=>{cancelAnimationFrame(q);q=requestAnimationFrame(()=>{if(S&&S.k
 function ui(){
  const vid=mode=='video';
  $('#go').hidden=!vid||busy||!S;$('#stop').hidden=!busy;pg.hidden=!busy;
- $('#save').hidden=vid?!R:!S;$('#fmtw').hidden=vid;
+ $('#save').hidden=vid?!R:!S;$('#fmtw').hidden=vid;$('#fpsw').hidden=!vid;$('#vnote').hidden=!vid;
  $$('.tabs button,#file').forEach(b=>b.disabled=busy);
  $('#sw').hidden=!S;
 }
@@ -204,12 +206,14 @@ function reset(){
  pv.pause();pv.removeAttribute('src');pv.load();orig.removeAttribute('src');
  $('#file').value='';ui();
 }
+const RF=[['x2','2× lipat'],['x3','3× lipat'],['x4','4× lipat'],['1080','Full HD (1080p)'],['1440','2K (1440p)'],['2160','4K (2160p)']],RV=[['1080','Full HD (1080p)'],['720','HD (720p)']];
+function fillRes(){const L=mode=='foto'?RF:RV;$('#res').innerHTML=L.map(([v,n])=>`<option value="${v}">${n}</option>`).join('');$('#res').value=mode=='foto'?'2160':'1080'}
 $$('.tabs button').forEach(b=>b.onclick=()=>{
  mode=b.dataset.m;$$('.tabs button').forEach(x=>x.setAttribute('aria-pressed',x==b));
  $('#file').accept=mode=='foto'?'image/*':'video/*';
  $('#dropt').textContent=mode=='foto'?'Pilih foto atau seret ke sini':'Pilih video atau seret ke sini';
  $('#drop small').textContent=mode=='foto'?'JPG, PNG, WebP, HEIC (jika didukung browser)':'MP4, MOV, WebM. Video diproses sepanjang durasinya.';
- $('#res').value=mode=='foto'?'2160':'1080';
+ fillRes();
  reset();
 });
 
@@ -242,6 +246,7 @@ dr.addEventListener('drop',e=>load(e.dataTransfer.files[0]));
 SL.forEach(([id])=>$('#'+id).addEventListener('input',()=>{sync();render()}));
 $$('[data-p]').forEach(b=>b.onclick=()=>{PRE[b.dataset.p].forEach((v,i)=>$('#'+SL[i][0]).value=v);sync();render()});
 $('#res').onchange=()=>{if(S&&!busy){setOut();render()}};
+$('#fps').onchange=()=>{if(S&&!busy)setOut()};
 $('#cmp').addEventListener('input',e=>stage.style.setProperty('--p',e.target.value));
 sync();
 
@@ -255,6 +260,7 @@ $('#save').onclick=()=>{
 $('#stop').onclick=()=>{canceled=true;if(rec&&rec.state!='inactive')rec.stop()};
 const CODECS=(window.MediaRecorder?['video/mp4;codecs=avc1,mp4a.40.2','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].filter(m=>MediaRecorder.isTypeSupported(m)):[]);
 let attemptId=0;
+function poke(){gl.enable(gl.SCISSOR_TEST);gl.scissor(0,0,1,1);gl.drawArrays(gl.TRIANGLE_STRIP,0,4);gl.disable(gl.SCISSOR_TEST)}
 function finish(m){go=false;if(spk)spk.gain.value=1;try{pv.pause()}catch(_){}pv.controls=true;busy=false;stage.dataset.s='vsrc';say(m);ui()}
 $('#go').onclick=()=>{
  if(!window.MediaRecorder||!cv.captureStream){say('Browser ini belum mendukung perekaman video. Gunakan Chrome, Edge, atau Safari terbaru.');return}
@@ -263,13 +269,13 @@ $('#go').onclick=()=>{
  stage.dataset.s='vrun';pv.controls=false;pv.muted=false;setOut();ui();runVideo(0);
 };
 async function runVideo(ci){
- const my=++attemptId,ch=[],mt=CODECS[ci]||'';let fin=false;
+ const my=++attemptId,ch=[],mt=CODECS[ci]||'',FPS=+$('#fps').value||60;let fin=false;
  const bail=e=>{
   if(fin||my!==attemptId)return;fin=true;go=false;
   try{if(rec&&rec.state!='inactive'){rec.onstop=null;rec.ondataavailable=null;rec.onerror=null;rec.stop()}}catch(_){}
   try{pv.pause()}catch(_){}
   if(!ch.length&&!canceled&&ci+1<CODECS.length){runVideo(ci+1);return}
-  finish('Gagal memproses'+(e&&(e.name||e.message)?': '+(e.name||'')+' '+(e.message||''):'')+'. Coba pilih resolusi lebih kecil (1080p atau 720p).');
+  finish('Gagal memproses'+(e&&(e.name||e.message)?': '+(e.name||'')+' '+(e.message||''):'')+'. Coba pilih resolusi 720p atau frame rate 30 fps.');
  };
  try{
   let withAudio=false;
@@ -280,29 +286,40 @@ async function runVideo(ci){
   }catch(_){}
   await new Promise(r=>{pv.onseeked=r;pv.currentTime=0;setTimeout(r,400)});
   S.up=false;draw();
-  const st=cv.captureStream();
+  let st=cv.captureStream(0),vt=st.getVideoTracks()[0];
+  if(!(vt&&vt.requestFrame)){st=cv.captureStream(FPS);vt=null}
   if(withAudio)DEST.stream.getAudioTracks().forEach(t=>st.addTrack(t));
-  const bps=Math.min(2.5e7,cv.width*cv.height*30*.2);
+  const bps=Math.min(2e7,cv.width*cv.height*FPS*.1);
   rec=new MediaRecorder(st,mt?{mimeType:mt,videoBitsPerSecond:bps}:{videoBitsPerSecond:bps});
   rec.ondataavailable=e=>{if(e.data.size)ch.push(e.data)};
   rec.onerror=e=>bail(e.error||e);
   rec.onstop=()=>{
    if(fin||my!==attemptId)return;fin=true;
-   if(canceled||!ch.length){finish(canceled?'Dibatalkan.':'Perekaman gagal. Coba pilih resolusi lebih kecil.');return}
+   if(canceled||!ch.length){finish(canceled?'Dibatalkan.':'Perekaman gagal. Coba pilih resolusi 720p atau 30 fps.');return}
    const type=(rec.mimeType||mt||'video/webm').split(';')[0];
    R={blob:new Blob(ch,{type}),ext:type.includes('mp4')?'mp4':'webm'};
    if($('#rv').src)URL.revokeObjectURL($('#rv').src);
    $('#rv').src=URL.createObjectURL(R.blob);$('#result').hidden=false;
    finish('Selesai! Putar hasilnya di bawah, lalu klik Simpan hasil.');
   };
-  const tick=()=>{
-   if(!go||my!==attemptId)return;draw();pg.value=pv.duration?pv.currentTime/pv.duration:0;
-   if('requestVideoFrameCallback' in pv)pv.requestVideoFrameCallback(tick);else requestAnimationFrame(tick);
+  const hasRV='requestVideoFrameCallback' in pv,iv=1000/FPS;
+  let fresh=true,next=0,lastPg=0;
+  const onFrame=()=>{fresh=true;if(go&&my===attemptId)pv.requestVideoFrameCallback(onFrame)};
+  const tick=now=>{
+   if(!go||my!==attemptId)return;
+   if(now>=next-3){
+    next+=iv;if(now-next>iv)next=now;
+    if((fresh||!hasRV)&&pv.readyState>=2){draw();fresh=false}else poke();
+    if(vt)vt.requestFrame();
+    if(now-lastPg>250){lastPg=now;pg.value=pv.duration?pv.currentTime/pv.duration:0}
+   }
+   requestAnimationFrame(tick);
   };
-  pv.onended=()=>{if(my!==attemptId)return;draw();setTimeout(()=>{if(rec.state!='inactive')rec.stop()},250)};
-  go=true;rec.start(500);
+  pv.onended=()=>{if(my!==attemptId)return;draw();if(vt)vt.requestFrame();setTimeout(()=>{if(rec.state!='inactive')rec.stop()},250)};
+  go=true;if(hasRV)pv.requestVideoFrameCallback(onFrame);
+  rec.start(500);
   try{await pv.play()}catch(_){pv.muted=true;await pv.play()}
-  tick();
+  requestAnimationFrame(tick);
   setTimeout(()=>{if(!fin&&my===attemptId&&!ch.length)bail(new Error('encoder tidak menghasilkan data'))},6000);
  }catch(e){bail(e)}
 }
