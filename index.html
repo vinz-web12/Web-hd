@@ -98,10 +98,11 @@ progress{flex:1;min-width:140px;height:10px;accent-color:var(--acc)}
 <button type="button" class="btn s" data-p="nat">Natural</button>
 <button type="button" class="btn s" data-p="taj">Tajam</button>
 <button type="button" class="btn s" data-p="mak">Maksimal</button>
+<button type="button" class="btn s" data-p="ult" data-ph title="Untuk foto yang sudah di-HD-kan AI">Ultra</button>
 </span>
 </div>
 <div class="grid" id="sl"></div>
-<p class="note">Cara kerjanya: pembesaran bicubic, pengurangan noise yang menjaga tepi, lalu penajaman. Detail yang memang tidak ada di file asli tidak bisa dibuat ulang, jadi hasil terbaik datang dari sumber yang sudah cukup bersih.</p>
+<p class="note">Cara kerjanya: pembesaran bicubic, pengurangan noise yang menjaga tepi, penajaman, lalu penguat detail tiga skala (kecil, sedang, besar) khusus foto. Untuk foto yang sudah di-HD-kan AI, coba preset Ultra. Detail yang memang tidak ada di file asli tidak bisa dibuat ulang.</p>
 <p class="note" id="vnote" hidden>Video: hasil maksimal 1080p. Kalau video asli 30 fps, frame digandakan agar file berformat 60 fps (gerakan tidak jadi lebih halus). Biarkan tab tetap terbuka dan terlihat selama proses.</p>
 </section>
 
@@ -130,8 +131,9 @@ precision highp float;
 #else
 precision mediump float;
 #endif
-varying vec2 uv;uniform sampler2D t;uniform vec2 ts;uniform float sh,rd,ct,sa,dn;
+varying vec2 uv;uniform sampler2D t;uniform vec2 ts;uniform float sh,rd,ct,sa,dn,d1,d2,d3;uniform sampler2D t1,t2,t3,t4;
 vec3 T(vec2 u){return texture2D(t,u).rgb;}
+float cs(float b){return clamp(b*smoothstep(.006,.03,abs(b)),-.25,.25);}
 vec3 cr(vec2 u){
  vec2 sp=u*ts,tp=floor(sp-.5)+.5,f=sp-tp;
  vec2 w0=f*(-.5+f*(1.-.5*f)),w1=1.+f*f*(-2.5+1.5*f),w2=f*(.5+f*(2.-1.5*f)),w3=f*f*(-.5+.5*f);
@@ -146,6 +148,11 @@ void main(){
  vec3 dt=c0-bl;
  float m=smoothstep(.012,.06,length(dt));
  vec3 c=mix(c0,bl,dn*(1.-m))+sh*dt*m;
+ if(d1+d2+d3>0.){
+  vec3 K=vec3(.299,.587,.114);
+  float y0=dot(c0,K),y1=dot(texture2D(t1,uv).rgb,K),y2=dot(texture2D(t2,uv).rgb,K),y3=dot(texture2D(t3,uv).rgb,K),y4=dot(texture2D(t4,uv).rgb,K);
+  c+=vec3(d1*cs(y0-y1)+d2*cs(y1-y2)+d3*cs((y2-y3)+.6*(y3-y4)));
+ }
  c=(c-.5)*ct+.5;
  float l=dot(c,vec3(.299,.587,.114));
  c=mix(vec3(l),c,sa);
@@ -157,12 +164,33 @@ const lp=gl.getAttribLocation(pr,'p');gl.enableVertexAttribArray(lp);gl.vertexAt
 gl.bindTexture(gl.TEXTURE_2D,gl.createTexture());
 [gl.TEXTURE_WRAP_S,gl.TEXTURE_WRAP_T].forEach(k=>gl.texParameteri(gl.TEXTURE_2D,k,gl.CLAMP_TO_EDGE));
 [gl.TEXTURE_MIN_FILTER,gl.TEXTURE_MAG_FILTER].forEach(k=>gl.texParameteri(gl.TEXTURE_2D,k,gl.LINEAR));
-const U={};['ts','sh','rd','ct','sa','dn'].forEach(n=>U[n]=gl.getUniformLocation(pr,n));
+const U={};['ts','sh','rd','ct','sa','dn','d1','d2','d3'].forEach(n=>U[n]=gl.getUniformLocation(pr,n));
 const MAXT=gl.getParameter(gl.MAX_TEXTURE_SIZE);
+const LV=[];
+for(let i=1;i<=4;i++){
+ gl.activeTexture(gl.TEXTURE0+i);const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
+ [gl.TEXTURE_WRAP_S,gl.TEXTURE_WRAP_T].forEach(k=>gl.texParameteri(gl.TEXTURE_2D,k,gl.CLAMP_TO_EDGE));
+ [gl.TEXTURE_MIN_FILTER,gl.TEXTURE_MAG_FILTER].forEach(k=>gl.texParameteri(gl.TEXTURE_2D,k,gl.LINEAR));
+ gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([128,128,128,255]));
+ gl.uniform1i(gl.getUniformLocation(pr,'t'+i),i);LV.push(t);
+}
+gl.activeTexture(gl.TEXTURE0);gl.uniform1i(gl.getUniformLocation(pr,'t'),0);
+function pyr(){
+ let prev=S.src,w=S.w,h=S.h;
+ for(let i=0;i<4;i++){
+  w=Math.max(1,Math.round(w/2));h=Math.max(1,Math.round(h/2));
+  const c=document.createElement('canvas');c.width=w;c.height=h;
+  const x=c.getContext('2d');x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.drawImage(prev,0,0,w,h);
+  gl.activeTexture(gl.TEXTURE1+i);gl.bindTexture(gl.TEXTURE_2D,LV[i]);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,c);prev=c;
+ }
+ gl.activeTexture(gl.TEXTURE0);
+}
 
-const SL=[['sh','Ketajaman',0,2,.05,.9],['rd','Radius penajaman',.3,2,.05,.7],['dn','Pengurangan noise',0,1,.05,.3],['ct','Kontras',.8,1.4,.01,1.06],['sa','Warna',.8,1.5,.01,1.08]];
-const PRE={nat:[.5,.7,.2,1.02,1.04],taj:[.9,.7,.3,1.06,1.08],mak:[1.3,.6,.45,1.1,1.12]};
-$('#sl').innerHTML=SL.map(([id,n,a,b,s,v])=>`<label class="f"><span>${n}<output id="o${id}"></output></span><input type="range" id="${id}" min="${a}" max="${b}" step="${s}" value="${v}"></label>`).join('');
+
+const SL=[['sh','Ketajaman tepi',0,2,.05,.9],['rd','Radius penajaman',.3,2,.05,.7],['dn','Pengurangan noise',0,1,.05,.3],['ct','Kontras',.8,1.4,.01,1.06],['sa','Warna',.8,1.5,.01,1.08],['d1','Detail kecil (tekstur halus)',0,2,.05,.6,1],['d2','Detail sedang',0,2,.05,.4,1],['d3','Detail besar (struktur)',0,2,.05,.25,1]];
+const PRE={nat:[.5,.7,.2,1.02,1.04,.3,.2,.1],taj:[.9,.7,.3,1.06,1.08,.6,.4,.25],mak:[1.3,.6,.45,1.1,1.12,1,.7,.45],ult:[1.4,.6,.1,1.12,1.15,1.4,1,.7]};
+$('#sl').innerHTML=SL.map(([id,n,a,b,s,v,ph])=>`<label class="f"${ph?' data-ph':''}><span>${n}<output id="o${id}"></output></span><input type="range" id="${id}" min="${a}" max="${b}" step="${s}" value="${v}"></label>`).join('');
 const val=id=>+$('#'+id).value;const P={};
 const sync=()=>SL.forEach(([id])=>{P[id]=val(id);$('#o'+id).textContent=P[id].toFixed(2)});
 
@@ -174,7 +202,7 @@ function outSize(w,h){
  const W=w*s,H=h*s,k=Math.min(1,8192/Math.max(W,H),Math.sqrt(16.7e6/(W*H)));
  return[Math.max(2,Math.round(W*k/2)*2),Math.max(2,Math.round(H*k/2)*2)];
 }
-const fmtT=s=>Math.floor(s/60)+':'+String(Math.round(s%60)).padStart(2,'0');
+const fmtT=s=>s>0?Math.floor(s/60)+':'+String(Math.round(s%60)).padStart(2,'0'):'?';
 function setOut(){
  if(!S)return;
  const[W,H]=outSize(S.w,S.h);cv.width=W;cv.height=H;
@@ -189,7 +217,7 @@ function draw(){
  }
  gl.viewport(0,0,cv.width,cv.height);
  gl.uniform2f(U.ts,S.w,S.h);
- for(const n in P)gl.uniform1f(U[n],P[n]);
+ for(const n in P)gl.uniform1f(U[n],S.kind=='video'&&n[0]=='d'&&n!='dn'?0:P[n]);
  gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
 }
 const render=()=>{cancelAnimationFrame(q);q=requestAnimationFrame(()=>{if(S&&S.kind=='foto')draw()})};
@@ -197,7 +225,7 @@ const render=()=>{cancelAnimationFrame(q);q=requestAnimationFrame(()=>{if(S&&S.k
 function ui(){
  const vid=mode=='video';
  $('#go').hidden=!vid||busy||!S;$('#stop').hidden=!busy;pg.hidden=!busy;
- $('#save').hidden=vid?!R:!S;$('#fmtw').hidden=vid;$('#fpsw').hidden=!vid;$('#vnote').hidden=!vid;
+ $('#save').hidden=vid?!R:!S;$('#fmtw').hidden=vid;$$('[data-ph]').forEach(e=>e.hidden=vid);$('#fpsw').hidden=!vid;$('#vnote').hidden=!vid;
  $$('.tabs button,#file').forEach(b=>b.disabled=busy);
  $('#sw').hidden=!S;
 }
@@ -228,11 +256,12 @@ async function load(f){
    const im=new Image();im.src=url;await im.decode();
    let src=im,w=im.naturalWidth,h=im.naturalHeight;
    if(Math.max(w,h)>MAXT){const k=MAXT/Math.max(w,h),c=document.createElement('canvas');c.width=Math.round(w*k);c.height=Math.round(h*k);c.getContext('2d').drawImage(im,0,0,c.width,c.height);src=c;w=c.width;h=c.height}
-   S={kind:'foto',name,src,w,h,up:false};orig.src=url;stage.dataset.s='photo';
+   S={kind:'foto',name,src,w,h,up:false};pyr();orig.src=url;stage.dataset.s='photo';
   }else{
    pv.src=url;
    await new Promise((ok,no)=>{pv.onloadedmetadata=ok;pv.onerror=no});
-   S={kind:'video',name,src:pv,w:pv.videoWidth,h:pv.videoHeight,dur:pv.duration,live:true};stage.dataset.s='vsrc';pv.controls=true;
+   if(!isFinite(pv.duration)||pv.duration<=0)await fixDur();
+   S={kind:'video',name,src:pv,w:pv.videoWidth,h:pv.videoHeight,dur:isFinite(pv.duration)?pv.duration:0,live:true};stage.dataset.s='vsrc';pv.controls=true;
   }
  }catch(e){S=null;say(mode=='video'?'Video tidak bisa dibuka. Video iPhone berformat HEVC sering gagal di Chrome; coba di Safari atau ubah ke MP4 (H.264) dulu.':'Foto tidak bisa dibuka di browser ini. Coba JPG atau PNG.');ui();return}
  say('');setOut();ui();render();
@@ -268,6 +297,60 @@ $('#go').onclick=()=>{
  say('Memproses. Biarkan tab ini tetap terbuka dan terlihat sampai selesai.');
  stage.dataset.s='vrun';pv.controls=false;pv.muted=false;setOut();ui();runVideo(0);
 };
+function fixDur(){return new Promise(r=>{let d=false;const done=()=>{if(d)return;d=true;pv.ondurationchange=null;try{pv.currentTime=0}catch(_){}setTimeout(r,80)};pv.ondurationchange=()=>{if(isFinite(pv.duration)&&pv.duration>0)setTimeout(done,50)};pv.currentTime=1e101;setTimeout(done,4000)})}
+async function fixDuration(blob,type,sec){
+ try{
+  const buf=new Uint8Array(await blob.arrayBuffer());
+  return type.includes('mp4')?fixMp4(buf,blob,sec):fixWebm(buf,blob,sec);
+ }catch(_){return blob}
+}
+function fixMp4(buf,blob,sec){
+ const dv=new DataView(buf.buffer);
+ for(let i=4;i<Math.min(buf.length-40,8192);i++){
+  if(buf[i]==0x6d&&buf[i+1]==0x76&&buf[i+2]==0x68&&buf[i+3]==0x64){
+   const v=buf[i+4],ts=dv.getUint32(i+(v?24:16)),dp=i+(v?28:20);
+   if(!ts)return blob;
+   if(v){if(dv.getUint32(dp)||dv.getUint32(dp+4))return blob;dv.setUint32(dp+4,Math.round(sec*ts))}
+   else{if(dv.getUint32(dp))return blob;dv.setUint32(dp,Math.round(sec*ts))}
+   return new Blob([buf],{type:blob.type});
+  }
+ }
+ return blob;
+}
+function fixWebm(buf,blob,sec){
+ const il=b=>b>=128?1:b>=64?2:b>=32?3:4;
+ const hx=(p,n)=>{let x=0;for(let k=0;k<n;k++)x=x*256+buf[p+k];return x};
+ const rd=i=>{const b=buf[i];let l=1;while(l<8&&!(b&(128>>(l-1))))l++;let v=b&(255>>l),u=v==(255>>l);for(let k=1;k<l;k++){v=v*256+buf[i+k];if(buf[i+k]!=255)u=false}return{l,v,u}};
+ let p=0,n=il(buf[p]),z=rd(p+n);p+=n+z.l+z.v;
+ n=il(buf[p]);if(hx(p,n)!=0x18538067)return blob;
+ z=rd(p+n);if(!z.u)return blob;
+ p+=n+z.l;
+ while(p<buf.length){
+  n=il(buf[p]);const id=hx(p,n);z=rd(p+n);
+  if(id==0x1549A966){
+   if(z.u)return blob;
+   const ps=p+n+z.l,pe=ps+z.v;let scale=1e6,q=ps,dpos=-1,dlen=0;
+   while(q<pe){const n2=il(buf[q]),id2=hx(q,n2),s2=rd(q+n2),ds=q+n2+s2.l;
+    if(id2==0x2AD7B1)scale=hx(ds,s2.v);
+    if(id2==0x4489){dpos=ds;dlen=s2.v}
+    q=ds+s2.v}
+   const val=sec*1e9/scale;
+   if(dpos>=0){
+    const dv=new DataView(buf.buffer);
+    if(dlen==8)dv.setFloat64(dpos,val);else if(dlen==4)dv.setFloat32(dpos,val);else return blob;
+    return new Blob([buf],{type:blob.type});
+   }
+   const ns=z.v+11;if(ns>=Math.pow(2,7*z.l)-1)return blob;
+   const dur=new Uint8Array(11);dur[0]=0x44;dur[1]=0x89;dur[2]=0x88;new DataView(dur.buffer).setFloat64(3,val);
+   const nb=new Uint8Array(z.l);let t=ns;for(let k=z.l-1;k>=0;k--){nb[k]=t%256;t=Math.floor(t/256)}
+   nb[0]|=128>>(z.l-1);
+   return new Blob([buf.subarray(0,p+n),nb,buf.subarray(ps,pe),dur,buf.subarray(pe)],{type:blob.type});
+  }
+  if(z.u)return blob;
+  p+=n+z.l+z.v;
+ }
+ return blob;
+}
 async function runVideo(ci){
  const my=++attemptId,ch=[],mt=CODECS[ci]||'',FPS=+$('#fps').value||60;let fin=false;
  const bail=e=>{
@@ -293,17 +376,18 @@ async function runVideo(ci){
   rec=new MediaRecorder(st,mt?{mimeType:mt,videoBitsPerSecond:bps}:{videoBitsPerSecond:bps});
   rec.ondataavailable=e=>{if(e.data.size)ch.push(e.data)};
   rec.onerror=e=>bail(e.error||e);
-  rec.onstop=()=>{
+  rec.onstop=async()=>{
    if(fin||my!==attemptId)return;fin=true;
    if(canceled||!ch.length){finish(canceled?'Dibatalkan.':'Perekaman gagal. Coba pilih resolusi 720p atau 30 fps.');return}
    const type=(rec.mimeType||mt||'video/webm').split(';')[0];
-   R={blob:new Blob(ch,{type}),ext:type.includes('mp4')?'mp4':'webm'};
+   const sec=S&&S.dur>0?S.dur:(performance.now()-t0)/1000;
+   R={blob:await fixDuration(new Blob(ch,{type}),type,sec),ext:type.includes('mp4')?'mp4':'webm'};
    if($('#rv').src)URL.revokeObjectURL($('#rv').src);
    $('#rv').src=URL.createObjectURL(R.blob);$('#result').hidden=false;
    finish('Selesai! Putar hasilnya di bawah, lalu klik Simpan hasil.');
   };
   const hasRV='requestVideoFrameCallback' in pv,iv=1000/FPS;
-  let fresh=true,next=0,lastPg=0;
+  let fresh=true,next=0,lastPg=0,t0=0;
   const onFrame=()=>{fresh=true;if(go&&my===attemptId)pv.requestVideoFrameCallback(onFrame)};
   const tick=now=>{
    if(!go||my!==attemptId)return;
@@ -317,7 +401,7 @@ async function runVideo(ci){
   };
   pv.onended=()=>{if(my!==attemptId)return;draw();if(vt)vt.requestFrame();setTimeout(()=>{if(rec.state!='inactive')rec.stop()},250)};
   go=true;if(hasRV)pv.requestVideoFrameCallback(onFrame);
-  rec.start(500);
+  t0=performance.now();rec.start(500);
   try{await pv.play()}catch(_){pv.muted=true;await pv.play()}
   requestAnimationFrame(tick);
   setTimeout(()=>{if(!fin&&my===attemptId&&!ch.length)bail(new Error('encoder tidak menghasilkan data'))},6000);
